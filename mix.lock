@@ -1,0 +1,3 @@
+%{
+  "exjsonpath": {:hex, :exjsonpath, "0.9.0", "87e593eb0deb53aa0688ca9f9edc9fb3456aca83c82245f83201ea04d696feba", [:mix], [], "hexpm"},
+}
