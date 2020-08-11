@@ -51,31 +51,6 @@ defmodule ExJSONTemplateTest do
     assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
   end
 
-  test "render placeholder using a map" do
-    {:ok, compiled_template} = ExJSONTemplate.compile_template("{{ $.data }}")
-
-    map = %{"data" => %{"1" => 1, "a" => "A"}}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"1" => 1, "a" => "A"}}
-  end
-
-  test "render map with placeholder using a map" do
-    template = %{"data" => %{"result" => "{{ $.data }}"}}
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
-
-    map = %{"data" => %{"1" => 1, "a" => "A"}}
-    expected_rendered = %{"data" => %{"result" => %{"1" => 1, "a" => "A"}}}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
-  end
-
-  test "render array with placeholders using a map" do
-    template = ["{{ $.data.x }}", "{{ $.data.y }}", 0]
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
-
-    map = %{"data" => %{"x" => 0.5, "y" => -1.0, "t" => 5.3}}
-    expected_rendered = [0.5, -1.0, 0]
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
-  end
-
   test "render array with string interpolation using a map" do
     template = %{"data" => ["x: {{ $.x }}", "y: {{ $.y }}", "z: 0"]}
     {:ok, compiled_template} = ExJSONTemplate.compile_template(template)

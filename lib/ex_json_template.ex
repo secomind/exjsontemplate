@@ -22,156 +22,161 @@ defmodule ExJSONTemplate do
   that resembles mustache syntax, that can be used for JSON templating.
   """
 
-  @type template_base_type() :: String.t() | number() | boolean() | nil
-  @type template() ::
-          template_base_type() | list(template()) | %{optional(String.t()) => template()}
+  alias ExJSONTemplate.Interpolation
 
-  @opaque compiled_item() :: template_base_type() | {atom(), any()}
-  @opaque compiled_template() ::
-            compiled_item()
-            | list(compiled_template())
-            | %{optional(compiled_template()) => compiled_template()}
+  def compile_template(template) when is_map(template) do
+    Enum.reduce_while(template, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
+      case compile_template(v) do
+        {:ok, compiled} -> {:cont, {:ok, Map.put(acc, k, compiled)}}
+      end
+    end)
+  end
 
-  @type rendered_template() ::
-          template_base_type()
-          | list(rendered_template())
-          | %{optional(String.t()) => rendered_template()}
+  def compile_template([]) do
+    {:ok, []}
+  end
 
-  @spec compile_template(template()) :: {:ok, compiled_template()} | {:error, any()}
-  def compile_template(template_list)
-
-  def compile_template(template_list) when is_list(template_list) do
-    result =
-      Enum.reduce_while(template_list, {:ok, []}, fn value, {:ok, acc} ->
-        with {:ok, compiled_value} <- compile_template(value) do
-          {:cont, {:ok, [compiled_value | acc]}}
-        else
-          error -> {:halt, error}
-        end
-      end)
-
-    with {:ok, compiled_list} <- result do
-      {:ok, Enum.reverse(compiled_list)}
+  def compile_template([head | tail] = _template) do
+    with {:ok, compiled_tail} <- compile_template(tail),
+         {:ok, compiled_head} <- compile_template(head) do
+      {:ok, [compiled_head | compiled_tail]}
     end
   end
 
-  def compile_template(template_map) when is_map(template_map) do
-    Enum.reduce_while(template_map, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
-      with {:ok, compiled_key} <- compile_template(key),
-           {:ok, compiled_value} <- compile_template(value) do
-        {:cont, {:ok, Map.put(acc, compiled_key, compiled_value)}}
-      else
+  def compile_template(template) when is_binary(template) do
+    case parse_op(template) do
+      {:ok, :interpolate, tokens} ->
+        {:ok, %Interpolation{tokens: tokens}}
+
+      {:ok, :literal, literal} ->
+        {:ok, literal}
+    end
+  end
+
+  def compile_template(template) do
+    {:ok, template}
+  end
+
+  def parse_op(s), do: parse_op(s, :empty, [])
+
+  def parse_op("", {:open, _op}, _acc) do
+    {:error, :invalid}
+  end
+
+  def parse_op("", :literal, [acc]) do
+    {:ok, :literal, acc}
+  end
+
+  def parse_op("", :interpolate, [{_op, _s} | _tail] = acc) do
+    {:ok, :interpolate, Enum.reverse(acc)}
+  end
+
+  def parse_op("", :interpolate, [head | tail]) do
+    {:ok, :interpolate, Enum.reverse([{:literal, head} | tail])}
+  end
+
+  def parse_op("", op, [acc]) do
+    {:ok, op, acc}
+  end
+
+  def parse_op(<<"}}}", rest::binary>>, {:open, :triple_braces}, acc) do
+    parse_op(rest, :triple_braces, acc)
+  end
+
+  def parse_op(<<"}}", rest::binary>>, {:open, :interpolate}, [acc | tail]) do
+    case ExJSONPath.compile(acc) do
+      {:ok, compiled} -> parse_op(rest, :interpolate, ["", {:jsonpath, compiled} | tail])
+      _ -> {:error, :invalid_path}
+    end
+  end
+
+  def parse_op(<<"}}", rest::binary>>, {:open, op}, acc) when op != :triple_braces do
+    parse_op(rest, op, acc)
+  end
+
+  def parse_op(<<"\\{{{", rest::binary>>, op, acc) do
+    parse_op(rest, op, acc)
+  end
+
+  def parse_op(<<"\\{{", rest::binary>>, op, acc) do
+    parse_op(rest, op, acc)
+  end
+
+  def parse_op(<<"{{{", rest::binary>>, :empty, _acc) do
+    parse_op(rest, {:open, :triple_braces}, [""])
+  end
+
+  def parse_op(<<"{{&", rest::binary>>, :empty, _acc) do
+    parse_op(rest, {:open, :unquote}, [""])
+  end
+
+  def parse_op(<<"{{#", rest::binary>>, :empty, _acc) do
+    parse_op(rest, {:open, :section}, [""])
+  end
+
+  def parse_op(<<"{{?", rest::binary>>, :empty, _acc) do
+    parse_op(rest, {:open, :switch}, [""])
+  end
+
+  def parse_op(<<"{{", rest::binary>>, op, [acc | tail])
+      when op in [:empty, :literal, :interpolate] do
+    parse_op(rest, {:open, :interpolate}, ["", {:literal, acc} | tail])
+  end
+
+  def parse_op(<<"{{", rest::binary>>, :empty, _acc) do
+    parse_op(rest, {:open, :interpolate}, [""])
+  end
+
+  def parse_op(<<c, rest::binary>>, :empty, _acc) do
+    parse_op(rest, :literal, [<<c>>])
+  end
+
+  def parse_op(<<c, rest::binary>>, op, [acc | tail]) when op in [:literal, :interpolate] do
+    parse_op(rest, op, [<<acc::binary, c>> | tail])
+  end
+
+  def parse_op(<<c, rest::binary>>, {:open, op}, [acc | tail]) do
+    parse_op(rest, {:open, op}, [<<acc::binary, c>> | tail])
+  end
+
+  def parse_op(_s, _op, _acc) do
+    {:error, :invalid}
+  end
+
+  def render([], _input) do
+    {:ok, []}
+  end
+
+  def render([head | tail] = _compiled_template, input) do
+    with {:ok, rendered_tail} <- render(tail, input),
+         {:ok, rendered_head} <- render(head, input) do
+      {:ok, [rendered_head | rendered_tail]}
+    end
+  end
+
+  def render(%Interpolation{tokens: tokens}, input) do
+    Enum.reduce_while(tokens, {:ok, ""}, fn
+      {:literal, literal}, {:ok, acc} ->
+        {:cont, {:ok, acc <> literal}}
+
+      {:jsonpath, path}, {:ok, acc} ->
+        case ExJSONPath.eval(input, path) do
+          {:ok, [res]} -> {:cont, {:ok, acc <> to_string(res)}}
+          _ -> {:halt, {:error, :cannot_render}}
+        end
+    end)
+  end
+
+  def render(compiled_template, input) when is_map(compiled_template) do
+    Enum.reduce_while(compiled_template, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
+      case render(v, input) do
+        {:ok, rendered} -> {:cont, {:ok, Map.put(acc, k, rendered)}}
         error -> {:halt, error}
       end
     end)
   end
 
-  def compile_template("{{" <> rest = item) when is_binary(item) do
-    if String.slice(rest, -2, 2) == "}}" do
-      path_string = String.slice(rest, 0..-3)
-
-      with {:ok, json_path} <- ExJSONPath.compile(path_string) do
-        {:ok, {:json_path, json_path}}
-      end
-    else
-      make_string_interpolation(item)
-    end
-  end
-
-  def compile_template(item) when is_binary(item) do
-    if String.contains?(item, "{{") do
-      make_string_interpolation(item)
-    else
-      {:ok, item}
-    end
-  end
-
-  def compile_template(item) do
-    {:ok, item}
-  end
-
-  defp make_string_interpolation(string) do
-    {:ok, {:reverse_concat, make_string_interpolation(string, [])}}
-  end
-
-  defp make_string_interpolation(s, acc) do
-    case String.split(s, ["{{", "}}"], parts: 3) do
-      [literal_string, expr, rest] ->
-        new_acc = [{:json_path, expr}, literal_string | acc]
-        make_string_interpolation(rest, new_acc)
-
-      [literal_string, expr, ""] ->
-        [{:json_path, expr}, literal_string | acc]
-
-      [literal_string] ->
-        [literal_string | acc]
-    end
-  end
-
-  @spec render(compiled_template(), any()) :: {:ok, rendered_template()} | {:error, any()}
-  def render(template, input)
-
-  def render(template, input) when is_map(template) do
-    Enum.reduce_while(template, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
-      with {:ok, rendered_key} <- render(key, input),
-           {:ok, rendered_value} <- render(value, input) do
-        {:cont, {:ok, Map.put(acc, rendered_key, rendered_value)}}
-      else
-        error ->
-          {:halt, error}
-      end
-    end)
-  end
-
-  def render(template, input) when is_list(template) do
-    result =
-      Enum.reduce_while(template, {:ok, []}, fn value, {:ok, acc} ->
-        with {:ok, rendered_value} <- render(value, input) do
-          {:cont, {:ok, [rendered_value | acc]}}
-        else
-          error ->
-            {:halt, error}
-        end
-      end)
-
-    with {:ok, reversed_list} <- result do
-      {:ok, Enum.reverse(reversed_list)}
-    end
-  end
-
-  def render({:reverse_concat, tokens}, input) do
-    result =
-      Enum.reduce_while(tokens, {:ok, []}, fn value, {:ok, acc} ->
-        with {:ok, rendered_value} <- render(value, input),
-             {:map, false} <- {:map, is_map(rendered_value)},
-             {:list, false} <- {:list, is_list(rendered_value)} do
-          {:cont, {:ok, [rendered_value | acc]}}
-        else
-          {:map, true} ->
-            {:error, :cannot_render_template}
-
-          {:list, true} ->
-            {:error, :cannot_render_template}
-
-          error ->
-            {:halt, error}
-        end
-      end)
-
-    with {:ok, string_tokens} <- result do
-      {:ok, Enum.join(string_tokens, "")}
-    end
-  end
-
-  def render({:json_path, path}, input) do
-    case ExJSONPath.eval(input, path) do
-      {:ok, [result]} -> {:ok, result}
-      {:ok, result} -> {:ok, result}
-      _any -> {:error, :cannot_render_template}
-    end
-  end
-
-  def render(literal_value, _input) do
-    {:ok, literal_value}
+  def render(compiled_template, _input) do
+    {:ok, compiled_template}
   end
 end
