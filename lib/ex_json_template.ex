@@ -23,6 +23,7 @@ defmodule ExJSONTemplate do
   """
 
   alias ExJSONTemplate.Interpolation
+  alias ExJSONTemplate.Operation
 
   def compile_template(template) when is_map(template) do
     Enum.reduce_while(template, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
@@ -50,6 +51,12 @@ defmodule ExJSONTemplate do
 
       {:ok, :literal, literal} ->
         {:ok, literal}
+
+      {:ok, :triple_braces, path} ->
+        {:ok, %Operation{op: :triple_braces, jsonpath: path}}
+
+      {:ok, :unquote, path} ->
+        {:ok, %Operation{op: :unquote, jsonpath: path}}
     end
   end
 
@@ -167,6 +174,21 @@ defmodule ExJSONTemplate do
     end)
   end
 
+  def render(%Operation{op: :triple_braces, jsonpath: path}, input) do
+    case ExJSONPath.eval(input, path) do
+      {:ok, [res]} -> {:ok, res}
+      _ -> {:halt, {:error, :cannot_render}}
+    end
+  end
+
+  def render(%Operation{op: :unquote, jsonpath: path}, input) do
+    case ExJSONPath.eval(input, path) do
+      {:ok, [res]} when is_binary(res) -> unquote_string(res)
+      {:ok, [res]} -> {:ok, res}
+      _ -> {:halt, {:error, :cannot_render}}
+    end
+  end
+
   def render(compiled_template, input) when is_map(compiled_template) do
     Enum.reduce_while(compiled_template, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
       case render(v, input) do
@@ -178,5 +200,37 @@ defmodule ExJSONTemplate do
 
   def render(compiled_template, _input) do
     {:ok, compiled_template}
+  end
+
+  defp unquote_string("true") do
+    {:ok, true}
+  end
+
+  defp unquote_string("false") do
+    {:ok, false}
+  end
+
+  defp unquote_string("null") do
+    {:ok, nil}
+  end
+
+  defp unquote_string(<<c, _rest::binary>> = num) when (c >= ?0 and c <= ?9) or c == ?- do
+    case Integer.parse(num) do
+      {i, ""} when is_integer(i) ->
+        {:ok, i}
+
+      {i, _rest} when is_integer(i) ->
+        case Float.parse(num) do
+          {f, ""} -> {:ok, f}
+          _ -> {:error, :cannot_unquote}
+        end
+
+      _ ->
+        {:error, :cannot_unquote}
+    end
+  end
+
+  defp unquote_string(_string) do
+    {:error, :cannot_unquote}
   end
 end

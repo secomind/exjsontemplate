@@ -59,4 +59,114 @@ defmodule ExJSONTemplateTest do
     expected_rendered = %{"data" => ["x: 0.5", "y: -1.0", "z: 0"]}
     assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
   end
+
+  describe "triple braces operator" do
+    test "on a number" do
+      template = %{"the_number" => "{{{ $.num }}}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => 42}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42}}
+    end
+
+    test "do not parse number" do
+      template = %{"string" => "{{{ $.the_string }}}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"the_string" => "42"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"string" => "42"}}
+    end
+
+    test "nested object" do
+      template = %{"test" => "{{{ $.k }}}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"k" => %{"a" => %{"b" => "42"}}}
+
+      assert ExJSONTemplate.render(compiled_template, map) ==
+               {:ok, %{"test" => %{"a" => %{"b" => "42"}}}}
+    end
+  end
+
+  describe "unquote operator" do
+    test "on a number" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => 42}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42}}
+    end
+
+    test "parse integer" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => "42"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42}}
+    end
+
+    test "parse negative integer" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => "-42"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => -42}}
+    end
+
+    test "parse float" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => "42.0"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42.0}}
+    end
+
+    test "parse true" do
+      template = %{"a" => "{{& $.bool }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"bool" => "true"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"a" => true}}
+    end
+
+    test "parse false" do
+      template = %{"a" => "{{& $.bool }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"bool" => "false"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"a" => false}}
+    end
+
+    test "parse null" do
+      template = %{"a" => "{{& $.n }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"n" => "null"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"a" => nil}}
+    end
+
+    test "fail on unquotable string" do
+      template = %{"a" => "{{& $.u }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"u" => "hello"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:error, :cannot_unquote}
+    end
+
+    test "fail on invalid integer" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => "42z"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:error, :cannot_unquote}
+    end
+
+    test "fail on invalid float" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => "42.1z"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:error, :cannot_unquote}
+    end
+  end
 end
