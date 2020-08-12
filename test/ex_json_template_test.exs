@@ -20,44 +20,48 @@ defmodule ExJSONTemplateTest do
   use ExUnit.Case
   alias ExJSONTemplate
 
-  test "render string literal" do
-    assert ExJSONTemplate.compile_template("foo bar") == {:ok, "foo bar"}
+  describe "render literals" do
+    test "render string literal" do
+      assert ExJSONTemplate.compile_template("foo bar") == {:ok, "foo bar"}
+    end
+
+    test "render number literal" do
+      assert ExJSONTemplate.compile_template(42) == {:ok, 42}
+    end
   end
 
-  test "render number literal" do
-    assert ExJSONTemplate.compile_template(42) == {:ok, 42}
-  end
+  describe "render string interpolation" do
+    test "using a map as input" do
+      {:ok, compiled_template} = ExJSONTemplate.compile_template("Hello {{ $.first_name }}!")
 
-  test "render string interpolation using a map" do
-    {:ok, compiled_template} = ExJSONTemplate.compile_template("Hello {{ $.first_name }}!")
+      map = %{"first_name" => "Foo", "last_name" => "Bar"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Hello Foo!"}
+    end
 
-    map = %{"first_name" => "Foo", "last_name" => "Bar"}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Hello Foo!"}
-  end
+    test "which begins with {{ using a map as input" do
+      {:ok, compiled_template} = ExJSONTemplate.compile_template("{{ $.first_name }} ")
 
-  test "render string interpolation which begins with {{ using a map" do
-    {:ok, compiled_template} = ExJSONTemplate.compile_template("{{ $.first_name }} ")
+      map = %{"first_name" => "Foo", "last_name" => "Bar"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Foo "}
+    end
 
-    map = %{"first_name" => "Foo", "last_name" => "Bar"}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Foo "}
-  end
+    test "when using multiple interpolations" do
+      template = "x: {{ $.x }}, y: {{ $.y }}, z: 0"
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-  test "render multiple string interpolation using a map" do
-    template = "x: {{ $.x }}, y: {{ $.y }}, z: 0"
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+      map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
+      expected_rendered = "x: 0.5, y: -1.0, z: 0"
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
+    end
 
-    map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
-    expected_rendered = "x: 0.5, y: -1.0, z: 0"
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
-  end
+    test "inside of an array" do
+      template = %{"data" => ["x: {{ $.x }}", "y: {{ $.y }}", "z: 0"]}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-  test "render array with string interpolation using a map" do
-    template = %{"data" => ["x: {{ $.x }}", "y: {{ $.y }}", "z: 0"]}
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
-
-    map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
-    expected_rendered = %{"data" => ["x: 0.5", "y: -1.0", "z: 0"]}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
+      map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
+      expected_rendered = %{"data" => ["x: 0.5", "y: -1.0", "z: 0"]}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
+    end
   end
 
   describe "triple braces operator" do
