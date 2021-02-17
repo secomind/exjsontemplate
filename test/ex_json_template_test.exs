@@ -20,68 +20,157 @@ defmodule ExJSONTemplateTest do
   use ExUnit.Case
   alias ExJSONTemplate
 
-  test "render string literal" do
-    assert ExJSONTemplate.compile_template("foo bar") == {:ok, "foo bar"}
+  describe "render literals" do
+    test "render string literal" do
+      assert ExJSONTemplate.compile_template("foo bar") == {:ok, "foo bar"}
+    end
+
+    test "render number literal" do
+      assert ExJSONTemplate.compile_template(42) == {:ok, 42}
+    end
   end
 
-  test "render number literal" do
-    assert ExJSONTemplate.compile_template(42) == {:ok, 42}
+  describe "render string interpolation" do
+    test "using a map as input" do
+      {:ok, compiled_template} = ExJSONTemplate.compile_template("Hello {{ $.first_name }}!")
+
+      map = %{"first_name" => "Foo", "last_name" => "Bar"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Hello Foo!"}
+    end
+
+    test "which begins with {{ using a map as input" do
+      {:ok, compiled_template} = ExJSONTemplate.compile_template("{{ $.first_name }} ")
+
+      map = %{"first_name" => "Foo", "last_name" => "Bar"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Foo "}
+    end
+
+    test "when using multiple interpolations" do
+      template = "x: {{ $.x }}, y: {{ $.y }}, z: 0"
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
+      expected_rendered = "x: 0.5, y: -1.0, z: 0"
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
+    end
+
+    test "inside of an array" do
+      template = %{"data" => ["x: {{ $.x }}", "y: {{ $.y }}", "z: 0"]}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
+      expected_rendered = %{"data" => ["x: 0.5", "y: -1.0", "z: 0"]}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
+    end
   end
 
-  test "render string interpolation using a map" do
-    {:ok, compiled_template} = ExJSONTemplate.compile_template("Hello {{ $.first_name }}!")
+  describe "triple braces operator" do
+    test "on a number" do
+      template = %{"the_number" => "{{{ $.num }}}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-    map = %{"first_name" => "Foo", "last_name" => "Bar"}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Hello Foo!"}
+      map = %{"num" => 42}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42}}
+    end
+
+    test "do not parse number" do
+      template = %{"string" => "{{{ $.the_string }}}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"the_string" => "42"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"string" => "42"}}
+    end
+
+    test "nested object" do
+      template = %{"test" => "{{{ $.k }}}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"k" => %{"a" => %{"b" => "42"}}}
+
+      assert ExJSONTemplate.render(compiled_template, map) ==
+               {:ok, %{"test" => %{"a" => %{"b" => "42"}}}}
+    end
   end
 
-  test "render string interpolation which begins with {{ using a map" do
-    {:ok, compiled_template} = ExJSONTemplate.compile_template("{{ $.first_name }} ")
+  describe "unquote operator" do
+    test "on a number" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-    map = %{"first_name" => "Foo", "last_name" => "Bar"}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, "Foo "}
-  end
+      map = %{"num" => 42}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42}}
+    end
 
-  test "render multiple string interpolation using a map" do
-    template = "x: {{ $.x }}, y: {{ $.y }}, z: 0"
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+    test "parse integer" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-    map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
-    expected_rendered = "x: 0.5, y: -1.0, z: 0"
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
-  end
+      map = %{"num" => "42"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42}}
+    end
 
-  test "render placeholder using a map" do
-    {:ok, compiled_template} = ExJSONTemplate.compile_template("{{ $.data }}")
+    test "parse negative integer" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-    map = %{"data" => %{"1" => 1, "a" => "A"}}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"1" => 1, "a" => "A"}}
-  end
+      map = %{"num" => "-42"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => -42}}
+    end
 
-  test "render map with placeholder using a map" do
-    template = %{"data" => %{"result" => "{{ $.data }}"}}
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+    test "parse float" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-    map = %{"data" => %{"1" => 1, "a" => "A"}}
-    expected_rendered = %{"data" => %{"result" => %{"1" => 1, "a" => "A"}}}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
-  end
+      map = %{"num" => "42.0"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"the_number" => 42.0}}
+    end
 
-  test "render array with placeholders using a map" do
-    template = ["{{ $.data.x }}", "{{ $.data.y }}", 0]
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+    test "parse true" do
+      template = %{"a" => "{{& $.bool }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-    map = %{"data" => %{"x" => 0.5, "y" => -1.0, "t" => 5.3}}
-    expected_rendered = [0.5, -1.0, 0]
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
-  end
+      map = %{"bool" => "true"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"a" => true}}
+    end
 
-  test "render array with string interpolation using a map" do
-    template = %{"data" => ["x: {{ $.x }}", "y: {{ $.y }}", "z: 0"]}
-    {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+    test "parse false" do
+      template = %{"a" => "{{& $.bool }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
 
-    map = %{"x" => 0.5, "y" => -1.0, "t" => 5.3}
-    expected_rendered = %{"data" => ["x: 0.5", "y: -1.0", "z: 0"]}
-    assert ExJSONTemplate.render(compiled_template, map) == {:ok, expected_rendered}
+      map = %{"bool" => "false"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"a" => false}}
+    end
+
+    test "parse null" do
+      template = %{"a" => "{{& $.n }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"n" => "null"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:ok, %{"a" => nil}}
+    end
+
+    test "fail on unquotable string" do
+      template = %{"a" => "{{& $.u }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"u" => "hello"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:error, :cannot_unquote}
+    end
+
+    test "fail on invalid integer" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => "42z"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:error, :cannot_unquote}
+    end
+
+    test "fail on invalid float" do
+      template = %{"the_number" => "{{& $.num }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      map = %{"num" => "42.1z"}
+      assert ExJSONTemplate.render(compiled_template, map) == {:error, :cannot_unquote}
+    end
   end
 end
