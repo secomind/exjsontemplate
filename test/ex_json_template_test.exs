@@ -173,4 +173,71 @@ defmodule ExJSONTemplateTest do
       assert ExJSONTemplate.render(compiled_template, map) == {:error, :cannot_unquote}
     end
   end
+
+  describe "# operator" do
+    test "on an array" do
+      template = %{"{{# repo }}" => "Hello {{ @ }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      inp = %{"repo" => ["Davide", "Riccardo"]}
+      outp = ["Hello Davide", "Hello Riccardo"]
+
+      assert ExJSONTemplate.render(compiled_template, inp) == {:ok, outp}
+    end
+
+    test "on an empty array" do
+      template = %{"{{# repo }}" => "Hello {{ @ }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      inp = %{"repo" => []}
+      outp = []
+
+      assert ExJSONTemplate.render(compiled_template, inp) == {:ok, outp}
+    end
+
+    test "on an objects array" do
+      template = %{"{{#repo}}" => "Hello {{ @.name }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      inp = %{"repo" => [%{"name" => "Davide"}, %{"name" => "Riccardo"}]}
+      outp = ["Hello Davide", "Hello Riccardo"]
+
+      assert ExJSONTemplate.render(compiled_template, inp) == {:ok, outp}
+    end
+
+    test "on an objects array with root and current item references" do
+      template = %{"{{#repo}}" => "Hello {{ @.name }} at {{ $.name }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      inp = %{"repo" => [%{"name" => "Davide"}, %{"name" => "Riccardo"}], "name" => "Ispirata"}
+      outp = ["Hello Davide at Ispirata", "Hello Riccardo at Ispirata"]
+
+      assert ExJSONTemplate.render(compiled_template, inp) == {:ok, outp}
+    end
+
+    test "multiple JSONPath results" do
+      template = %{"{{# $..user }}" => "Hello {{ @ }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      inp = [%{"user" => "foo"}, %{"user" => "bar"}]
+      outp = ["Hello foo", "Hello bar"]
+
+      assert ExJSONTemplate.render(compiled_template, inp) == {:ok, outp}
+    end
+
+    test "multiple JSONPath results with single result" do
+      template = %{"{{# $..user }}" => "Hello {{ @ }}"}
+      {:ok, compiled_template} = ExJSONTemplate.compile_template(template)
+
+      inp = [%{"user" => "bar"}]
+      outp = ["Hello bar"]
+
+      assert ExJSONTemplate.render(compiled_template, inp) == {:ok, outp}
+    end
+
+    test "with an invalid template" do
+      template = %{"{{# repo1 }}" => "Hello1 {{ @ }}", "{{# repo2 }}" => "Hello2 {{ @ }}"}
+      assert ExJSONTemplate.compile_template(template) == {:error, :invalid_template}
+    end
+  end
 end

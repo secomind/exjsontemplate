@@ -1,7 +1,7 @@
 #
 # This file is part of ExJSONTemplate.
 #
-# Copyright 2020 Ispirata Srl
+# Copyright 2021 Ispirata Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,28 +16,9 @@
 # limitations under the License.
 #
 
-defmodule ExJSONTemplate.MixProject do
-  use Mix.Project
-
-  def project do
-    [
-      app: :exjsontemplate,
-      version: "0.1.0",
-      elixir: "~> 1.8",
-      start_permanent: Mix.env() == :prod,
-      deps: deps()
-    ]
-  end
-
-  def application do
-    [
-      extra_applications: []
-    ]
-  end
-
-  defp deps do
-    [
-      {:exjsonpath, github: "ispirata/exjsonpath"}
-    ]
-  end
+defmodule ExJSONTemplate.Section do
+  defstruct [
+    :jsonpath,
+    :template
+  ]
 end
