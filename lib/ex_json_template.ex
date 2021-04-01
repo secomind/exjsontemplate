@@ -1,7 +1,7 @@
 #
 # This file is part of ExJSONTemplate.
 #
-# Copyright 2020 Ispirata Srl
+# Copyright 2020,2021 Ispirata Srl
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,11 +24,23 @@ defmodule ExJSONTemplate do
 
   alias ExJSONTemplate.Interpolation
   alias ExJSONTemplate.Operation
+  alias ExJSONTemplate.Section
 
   def compile_template(template) when is_map(template) do
     Enum.reduce_while(template, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
       case compile_template(v) do
-        {:ok, compiled} -> {:cont, {:ok, Map.put(acc, k, compiled)}}
+        {:ok, compiled_value} ->
+          case compile_key(k) do
+            {:ok, key} when is_binary(key) ->
+              {:cont, {:ok, Map.put(acc, key, compiled_value)}}
+
+            {:ok, %Section{} = kt} ->
+              if map_size(template) == 1 do
+                {:halt, {:ok, %Section{kt | template: compiled_value}}}
+              else
+                {:halt, {:error, :invalid_template}}
+              end
+          end
       end
     end)
   end
@@ -62,6 +74,16 @@ defmodule ExJSONTemplate do
 
   def compile_template(template) do
     {:ok, template}
+  end
+
+  def compile_key(key_template) do
+    case parse_op(key_template) do
+      {:ok, :literal, literal} ->
+        {:ok, literal}
+
+      {:ok, :section, path} ->
+        {:ok, %Section{jsonpath: path}}
+    end
   end
 
   def parse_op(s), do: parse_op(s, :empty, [])
@@ -150,55 +172,78 @@ defmodule ExJSONTemplate do
     {:error, :invalid}
   end
 
-  def render([], _input) do
+  def render(compiled_template, input),
+    do: render(compiled_template, input, input)
+
+  defp render([], _root, _input) do
     {:ok, []}
   end
 
-  def render([head | tail] = _compiled_template, input) do
-    with {:ok, rendered_tail} <- render(tail, input),
-         {:ok, rendered_head} <- render(head, input) do
+  defp render([head | tail] = _compiled_template, root, input) do
+    with {:ok, rendered_tail} <- render(tail, root, input),
+         {:ok, rendered_head} <- render(head, root, input) do
       {:ok, [rendered_head | rendered_tail]}
     end
   end
 
-  def render(%Interpolation{tokens: tokens}, input) do
+  defp render(%Interpolation{tokens: tokens}, root, input) do
     Enum.reduce_while(tokens, {:ok, ""}, fn
       {:literal, literal}, {:ok, acc} ->
         {:cont, {:ok, acc <> literal}}
 
       {:jsonpath, path}, {:ok, acc} ->
-        case ExJSONPath.eval(input, path) do
+        case ExJSONPath.eval(root, input, path) do
           {:ok, [res]} -> {:cont, {:ok, acc <> to_string(res)}}
           _ -> {:halt, {:error, :cannot_render}}
         end
     end)
   end
 
-  def render(%Operation{op: :triple_braces, jsonpath: path}, input) do
-    case ExJSONPath.eval(input, path) do
+  defp render(%Operation{op: :triple_braces, jsonpath: path}, root, input) do
+    case ExJSONPath.eval(root, input, path) do
       {:ok, [res]} -> {:ok, res}
       _ -> {:halt, {:error, :cannot_render}}
     end
   end
 
-  def render(%Operation{op: :unquote, jsonpath: path}, input) do
-    case ExJSONPath.eval(input, path) do
+  defp render(%Operation{op: :unquote, jsonpath: path}, root, input) do
+    case ExJSONPath.eval(root, input, path) do
       {:ok, [res]} when is_binary(res) -> unquote_string(res)
       {:ok, [res]} -> {:ok, res}
       _ -> {:halt, {:error, :cannot_render}}
     end
   end
 
-  def render(compiled_template, input) when is_map(compiled_template) do
+  defp render(%Section{jsonpath: path, template: template}, root, input) do
+    render_item = fn item, {:ok, acc} ->
+      case render(template, root, item) do
+        {:ok, rendered} -> {:cont, {:ok, acc ++ [rendered]}}
+        error -> {:halt, error}
+      end
+    end
+
+    case ExJSONPath.eval(root, input, path) do
+      {:ok, [res]} when is_list(res) ->
+        Enum.reduce_while(res, {:ok, []}, render_item)
+
+      {:ok, res} when is_list(res) ->
+        Enum.reduce_while(res, {:ok, []}, render_item)
+
+      _ ->
+        {:halt, {:error, :cannot_render}}
+    end
+  end
+
+  defp render(compiled_template, root, input) when is_map(compiled_template) do
     Enum.reduce_while(compiled_template, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
-      case render(v, input) do
+      case render(v, root, input) do
         {:ok, rendered} -> {:cont, {:ok, Map.put(acc, k, rendered)}}
         error -> {:halt, error}
       end
     end)
   end
 
-  def render(compiled_template, _input) do
+  defp render(compiled_template, _root, _input) do
     {:ok, compiled_template}
   end
 

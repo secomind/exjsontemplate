@@ -73,13 +73,13 @@ Array templates can be written using `#` section operator:
 
 ```
 in: {"repo": [{"name": "Davide"}, {"name": "Riccardo"}]}
-t: {"{{#repo}}": "Hello {{ $.name }}"}
+t: {"{{#repo}}": "Hello {{ @.name }}"}
 out: ["Hello Davide", "Hello Riccardo"]
 ```
 
 ```
 in: {"repo": ["Davide", "Riccardo"]}
-t: {"{{#repo}}": "Hello {{ $ }}"}
+t: {"{{#repo}}": "Hello {{ @ }}"}
 out: ["Hello Davide", "Hello Riccardo"]
 ```
 
@@ -207,7 +207,7 @@ same way of an array single result (`[["foo", "bar"]]`).
 
 ```
 in: [{"user": "foo"}, %{"user" => "bar"}]
-t: {"{{# $..user }}": ["Hello {{ $ }}]}
+t: {"{{# $..user }}": "Hello {{ @ }}"}
 out: ["Hello foo", "Hello bar"]
 ```
 
